@@ -19,46 +19,60 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. 今回のPushで追加・修正されたinput内のファイル名を取得
-          # (複数ある場合は最新の1つを対象にする)
-          TARGET_FILE=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | grep '^input/' | tail -n 1)
-          
+          # 1. ターゲットファイルの特定（inputフォルダ内の最新ファイル）
+          TARGET_FILE=$(ls -t input/*.md 2>/dev/null | head -n 1)
           if [ -z "$TARGET_FILE" ]; then
-            echo "対象ファイルが見つかりません。処理をスキップします。"
-            exit 0
+            echo "Error: inputフォルダにファイルが見つかりません。"
+            exit 1
           fi
-          
-          echo "Processing file: $TARGET_FILE"
-          
-          # 2. ファイルの内容を読み取り、プロンプトを構築
-          # ファイルの中身をJSONで安全に送れるよう、jqを使ってエスケープ
           USER_REQUEST=$(cat "$TARGET_FILE")
-          PROMPT="以下の要望を元に、Jiraのチケット（タイトル、説明、受入基準）をMarkdown形式で作成してください。テンプレートは/templates配下にあります。/src内の既存ソースコードを参考にしてください。:\n\n$USER_REQUEST"
           
-          # 3. APIリクエストの実行
-          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
+          # 2. テンプレートの読み込み（決め打ち）
+          TICKET_TEMPLATE=$(cat templates/ticket_template.txt)
+          
+          # 3. /src 配下のコード読み込み（必要になったらコメントアウトを外す）
+          # SOURCE_CODES=$(find src -type f \( -name "*.py" -o -name "*.js" -o -name "*.ts" \) -exec echo "--- File: {} ---" \; -exec cat {} \;)
+          SOURCE_CODES="現在はソースコードの読み込みをスキップしています。"
+
+          # 4. プロンプトの構築
+          FULL_PROMPT_TEXT=$(cat <<EOS
+          あなたは優秀なPMです。以下の【要望】を元に、Jiraチケットを作成してください。
+
+          ### 指示:
+          - 【テンプレート】の形式（項目や見出し）を厳守すること。
+          - 簡潔かつ開発者が着手しやすい内容にすること。
+
+          ### 【要望】:
+          $USER_REQUEST
+
+          ### 【テンプレート】:
+          $TICKET_TEMPLATE
+
+          ### 【参考情報（ソース構成）】:
+          $SOURCE_CODES
+          EOS
+          )
+
+          # 5. APIリクエスト
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
             -H 'Content-Type: application/json' \
             -d "{
               \"contents\": [{
-                \"parts\":[{\"text\": $(echo "$PROMPT" | jq -aRs .)}]
+                \"parts\":[{\"text\": $(echo "$FULL_PROMPT_TEXT" | jq -aRs .)}]
               }]
             }")
 
-          # 4. レスポンスからテキスト部分のみを抽出
+          # 6. 抽出と保存
           TICKET_CONTENT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
-
+          
           if [ "$TICKET_CONTENT" == "null" ]; then
-            echo "Error: Geminiからの応答が空です。"
+            echo "APIエラーが発生しました。レスポンスを確認してください:"
             echo "$RESPONSE"
             exit 1
           fi
 
-          # 5. 結果を output フォルダに保存 (ファイル名にタイムスタンプを付与)
           mkdir -p output
-          OUTPUT_FILENAME="ticket_$(date +%Y%m%d_%H%M%S).md"
-          echo "$TICKET_CONTENT" > "output/$OUTPUT_FILENAME"
-          
-          echo "Generated: output/$OUTPUT_FILENAME"
+          echo "$TICKET_CONTENT" > "output/ticket_$(date +%Y%m%d_%H%M%S).md"
 
       - name: Commit and Push
         run: |
