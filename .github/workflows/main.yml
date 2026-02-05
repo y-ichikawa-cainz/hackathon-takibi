@@ -1,65 +1,26 @@
-name: Gemini Ticket Generator
-
+name: Debug Push
 on:
   push:
     paths:
       - 'input/**'
 
 jobs:
-  generate:
+  debug-job:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # これが最重要！
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
-      - name: Get Input Content
-        id: get_input
+      - name: Create Dummy File
         run: |
-          NEW_FILE=$(git diff --name-only HEAD^ HEAD | grep "input/" | grep ".md" | head -n 1)
-          if [ -z "$NEW_FILE" ]; then exit 0; fi
-          echo "file_path=$NEW_FILE" >> $GITHUB_OUTPUT
-          # ファイル内容をエスケープして環境変数へ
-          echo "content=$(cat $NEW_FILE | tr -d '\n\r')" >> $GITHUB_OUTPUT
+          echo "Success at $(date)" > input/success.txt
 
-      - name: Ask Gemini
-        if: steps.get_input.outputs.file_path != ''
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      - name: Force Push
         run: |
-          # src配下のディレクトリ構造を取得
-          SRC_STRUCT=$(find src -maxdepth 2)
-
-          # プロンプト作成
-          PROMPT="あなたはシニアエンジニアです。以下の要望と既存コードの構造を元に、Jiraチケット案（Summary, Description, Acceptance Criteria）をMarkdown形式で出力してください。
-          要望: ${{ steps.get_input.outputs.content }}
-          ディレクトリ構造: $SRC_STRUCT"
-
-          # Gemini API 呼び出し (1.5-flashを使用)
-          RESPONSE=$(curl "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}" \
-            -H 'Content-Type: application/json' \
-            -X POST \
-            -d "{
-              \"contents\": [{
-                \"parts\":[{\"text\": \"$PROMPT\"}]
-              }]
-            }")
-
-          # レスポンスからテキスト部分のみ抽出してファイル保存
-          echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text' > ticket_result.md
-
-      - name: Commit Result
-        if: steps.get_input.outputs.file_path != ''
-        run: |
-          BASE_NAME=$(basename "${{ steps.get_input.outputs.file_path }}" .md)
-          OUTPUT_PATH="input/${BASE_NAME}_ticket.md"
-          mv ticket_result.md "$OUTPUT_PATH"
-          
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "$OUTPUT_PATH"
-          git commit -m "docs: AI generated ticket for $BASE_NAME"
+          git add input/success.txt
+          git commit -m "debug: write success.txt"
           git push
