@@ -20,7 +20,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           # 1. ターゲットファイルの特定（inputフォルダ内の最新ファイル）
-          TARGET_FILE=$(ls -t input/*.md 2>/dev/null | head -n 1)
+          TARGET_FILE=$(ls -t input/*.txt 2>/dev/null | head -n 1)
           if [ -z "$TARGET_FILE" ]; then
             echo "Error: inputフォルダにファイルが見つかりません。"
             exit 1
