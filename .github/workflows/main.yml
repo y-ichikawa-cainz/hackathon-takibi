@@ -33,7 +33,7 @@ jobs:
           # 2. ファイルの内容を読み取り、プロンプトを構築
           # ファイルの中身をJSONで安全に送れるよう、jqを使ってエスケープ
           USER_REQUEST=$(cat "$TARGET_FILE")
-          PROMPT="以下の要望を元に、Jiraのチケット（タイトル、説明、受入基準）を作成してください。フォーマットはMarkdownでお願いします。:\n\n$USER_REQUEST"
+          PROMPT="以下の要望を元に、Jiraのチケット（タイトル、説明、受入基準）をMarkdown形式で作成してください。テンプレートは/templates配下にあります。/src内の既存ソースコードを参考にしてください。:\n\n$USER_REQUEST"
           
           # 3. APIリクエストの実行
           RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}" \
