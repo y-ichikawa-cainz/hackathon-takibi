@@ -1,0 +1,88 @@
+name: Gemini Jira Ticket Generator
+
+on:
+  repository_dispatch:
+    types: [test_gemini]
+
+jobs:
+  generate-ticket:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate Ticket with Gemini
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # ペイロードから値を取得
+          USER_MESSAGE: ${{ github.event.client_payload.message }}
+          USER_COMMENT: ${{ github.event.client_payload.comment }}
+        run: |
+          # 1. 要望の結合
+          # メッセージとコメントを組み合わせて1つの要望とする
+          USER_REQUEST=$(echo -e "Message: $USER_MESSAGE\nComment: $USER_COMMENT")
+          
+          if [ -z "$USER_MESSAGE" ] && [ -z "$USER_COMMENT" ]; then
+            echo "Error: client_payload に message または comment が含まれていません。"
+            exit 1
+          fi
+
+          # 2. テンプレートの読み込み
+          if [ ! -f "templates/ticket_template.md" ]; then
+            echo "Error: templates/ticket_template.md が見つかりません。"
+            exit 1
+          fi
+          TICKET_TEMPLATE=$(cat templates/ticket_template.md)
+          
+          # 3. ソース構成（必要に応じて有効化）
+          SOURCE_CODES="現在はソースコードの読み込みをスキップしています。"
+
+          # 4. プロンプトの構築
+          FULL_PROMPT_TEXT=$(cat <<EOS
+          あなたは優秀なPMです。以下の【要望】を元に、Jiraチケットを作成してください。
+
+          ### 指示:
+          - 【テンプレート】の項目や見出しを厳守すること。md形式で読みやすいドキュメントにすること。
+          - 開発者が即座に実装詳細を理解できるよう、具体的かつ簡潔に記述すること。
+
+          ### 【要望】:
+          $USER_REQUEST
+
+          ### 【テンプレート】:
+          $TICKET_TEMPLATE
+
+          ### 【参考情報（ソース構成）】:
+          $SOURCE_CODES
+          EOS
+          )
+
+          # 5. APIリクエスト (gemini-2.0-flash を指定)
+          RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            -d "{
+              \"contents\": [{
+                \"parts\":[{\"text\": $(echo "$FULL_PROMPT_TEXT" | jq -aRs .)}]
+              }]
+            }")
+
+          # 6. 抽出と保存
+          TICKET_CONTENT=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[0].text')
+          
+          if [ "$TICKET_CONTENT" == "null" ] || [ -z "$TICKET_CONTENT" ]; then
+            echo "APIエラーが発生しました。レスポンスを確認してください:"
+            echo "$RESPONSE"
+            exit 1
+          fi
+
+          mkdir -p output
+          echo "$TICKET_CONTENT" > "output/ticket_$(date +%Y%m%d_%H%M%S).md"
+
+      - name: Commit and Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/
+          git commit -m "docs: AI generated Jira ticket from dispatch" || echo "No changes to commit"
+          git push
